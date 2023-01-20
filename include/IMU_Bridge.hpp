@@ -35,6 +35,7 @@ struct IMUBridge
 {
     deque<sensor_msgs::Imu::ConstPtr> qCurrentIMU;          // 当前帧的IMU观测数据
     state_ikfom stateCurrentBegin;                          // 上一次的后验估计
+    state_ikfom stateIterated;
     Eigen::Matrix<double, 24, 24> covCurrentBegin;          // 上一次估计的后验协方差
     Eigen::Matrix<double, 12, 12> Q;                        // 噪声协方差
     double last_lidar_end_time;

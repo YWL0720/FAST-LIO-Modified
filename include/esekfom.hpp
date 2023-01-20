@@ -258,6 +258,8 @@ namespace esekfom
                 if (i > -1)
                 {
                     predict_iterated();
+                    x_propagated = sBridge.stateIterated;
+                    P_propagated = P_;
                 }
 
 				dyn_share.valid = true;
@@ -320,6 +322,9 @@ namespace esekfom
          */
         void predict_iterated()
         {
+            // 保留上一次的估计值
+            state_ikfom current_state = x_;
+
             std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
             // 重置预测状态和预测协方差
             x_.pos = sBridge.stateCurrentBegin.pos;
@@ -377,7 +382,8 @@ namespace esekfom
             std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
             double timecost= std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
             //std::cout << "Once predict iterated cost " << timecost * 1000 << " ms" << std::endl;
-
+            sBridge.stateIterated = x_;
+            x_ = current_state;
         }
 
 	private:

@@ -36,11 +36,20 @@ struct IMUBridge
     deque<sensor_msgs::Imu::ConstPtr> qCurrentIMU;          // 当前帧的IMU观测数据
     state_ikfom stateCurrentBegin;                          // 上一次的后验估计
     state_ikfom stateIterated;
+    Eigen::Matrix<double, 24, 24> covIterated;
     Eigen::Matrix<double, 24, 24> covCurrentBegin;          // 上一次估计的后验协方差
     Eigen::Matrix<double, 12, 12> Q;                        // 噪声协方差
     double last_lidar_end_time;
     double last_delta_time;
     Eigen::Vector3d mean_acc;
+
+    vector<Pose6D> currentIMUpose;                          // 当前帧存放的IMUPose
+    Pose6D firstPose;                                       // 第一个IMUpose 保持不变
+    double pcl_beg_time;
+
+    pcl::VoxelGrid<PointType> downSizeFilterSurf;
+
+    PointCloudXYZI cur_pcl;
 };
 
 #endif //SFAST_LIO_IMU_BRIDGE_HPP

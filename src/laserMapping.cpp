@@ -624,6 +624,8 @@ int main(int argc, char** argv)
             p_imu1->Process(Measures, kf, feats_undistort);
             // IMU数据传递
             kf.sBridge = p_imu1->sBridge;
+            kf.sBridge.downSizeFilterSurf = downSizeFilterSurf;
+
 
             //如果feats_undistort为空 ROS_WARN
             if (feats_undistort->empty() || (feats_undistort == NULL))
@@ -673,8 +675,10 @@ int main(int argc, char** argv)
             }
 
             /*** iterated state estimation ***/
-            Nearest_Points.resize(feats_down_size);         //存储近邻点的vector
+            Nearest_Points.resize(feats_down_size * 10);         //存储近邻点的vector
             kf.update_iterated_dyn_share_modified(LASER_POINT_COV, feats_down_body, ikdtree, Nearest_Points, NUM_MAX_ITERATIONS, extrinsic_est_en);
+            feats_down_size = feats_down_body->points.size();
+
 
             state_point = kf.get_x();
             pos_lid = state_point.pos + state_point.rot.matrix() * state_point.offset_T_L_I;
@@ -683,6 +687,7 @@ int main(int argc, char** argv)
             publish_odometry(pubOdomAftMapped);
 
             /*** add the feature points to map kdtree ***/
+
             feats_down_world->resize(feats_down_size);
             map_incremental();
             

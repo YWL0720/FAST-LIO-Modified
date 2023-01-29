@@ -203,18 +203,22 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf &kf_state
     sort(pcl_out.points.begin(), pcl_out.points.end(), time_list);  //这里curvature中存放了时间戳（在preprocess.cpp中）
 
 
+
     state_ikfom imu_state = kf_state.get_x();  // 获取上一次KF估计的后验状态作为本次IMU预测的初始状态
+
+    // 通过Bridge传递相关的数据 当前帧原始点云 当前帧IMU观测值 当前帧的初始状态和协方差等
+    pcl::copyPointCloud(pcl_out, sBridge.cur_pcl);
+    sBridge.qCurrentIMU = v_imu;
+    sBridge.stateCurrentBegin = imu_state;
     sBridge.covCurrentBegin = kf_state.get_P();
+    sBridge.last_lidar_end_time = last_lidar_end_time_;
+    sBridge.mean_acc = mean_acc;
+    sBridge.firstPose = set_pose6d(0.0, acc_s_last, angvel_last, imu_state.vel, imu_state.pos, imu_state.rot.matrix());
 
     IMUpose.clear();
     IMUpose.push_back(set_pose6d(0.0, acc_s_last, angvel_last, imu_state.vel, imu_state.pos, imu_state.rot.matrix()));
-    //将初始状态加入IMUpose中,包含有时间间隔，上一帧加速度，上一帧角速度，上一帧速度，上一帧位置，上一帧旋转矩阵
 
-    /**** 将有关数据加入Bridge ****/
-    sBridge.qCurrentIMU = v_imu;
-    sBridge.stateCurrentBegin = imu_state;
-    sBridge.last_lidar_end_time = last_lidar_end_time_;
-    sBridge.mean_acc = mean_acc;
+
 
 
     /*** 前向传播 ***/
@@ -267,22 +271,20 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf &kf_state
         //更新上一帧世界坐标系下的加速度 = R*(加速度-bias) - g
         acc_s_last  = V3D(tail->linear_acceleration.x, tail->linear_acceleration.y, tail->linear_acceleration.z) * G_m_s2 / mean_acc.norm();
 
-        // std::cout << "acc_s_last: " << acc_s_last.transpose() << std::endl;
-        // std::cout << "imu_state.ba: " << imu_state.ba.transpose() << std::endl;
-        // std::cout << "imu_state.grav: " << imu_state.grav.transpose() << std::endl;
         acc_s_last = imu_state.rot * (acc_s_last - imu_state.ba) + imu_state.grav;
-        // std::cout << "--acc_s_last: " << acc_s_last.transpose() << std::endl<< std::endl;
+
+        sBridge.pcl_beg_time = pcl_beg_time;
 
         double &&offs_t = tail->header.stamp.toSec() - pcl_beg_time;    //后一个IMU时刻距离此次雷达开始的时间间隔
         IMUpose.push_back( set_pose6d( offs_t, acc_s_last, angvel_last, imu_state.vel, imu_state.pos, imu_state.rot.matrix() ) );
     }
 
+    sBridge.currentIMUpose = IMUpose;
     sBridge.Q = Q;
 
     // 把最后一帧IMU测量也补上
     dt = abs(pcl_end_time - imu_end_time);
     last_delta_time = dt;
-
     sBridge.last_delta_time = last_delta_time;
 
     kf_state.predict(dt, Q, in);

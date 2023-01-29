@@ -254,12 +254,24 @@ namespace esekfom
 
 			for (int i = -1; i < maximum_iter; i++)	 // maximum_iter是卡尔曼滤波的最大迭代次数
 			{
-                // 进行预测迭代
+                // 从IEKF第二次迭代开始进行预测迭代
                 if (i > -1)
                 {
+                    // 前向预测迭代
                     predict_iterated();
+                    // 更新预测状态和预测协方差
                     x_propagated = sBridge.stateIterated;
-                    P_propagated = P_;
+                    P_propagated = sBridge.covIterated;
+                    // 重新进行去畸变
+                    PointCloudXYZI::Ptr pcl_out(new PointCloudXYZI());
+                    undistort_iterated(sBridge.cur_pcl, pcl_out);
+                    // 清空当前点 重新进行下采样
+                    feats_down_body->clear();
+                    sBridge.downSizeFilterSurf.setInputCloud(pcl_out);
+                    sBridge.downSizeFilterSurf.filter(*feats_down_body);
+                    // 对有关变量重新调整大小
+                    normvec->resize(int(feats_down_body->points.size()));
+//                    Nearest_Points.resize(int(feats_down_body->points.size()));
                 }
 
 				dyn_share.valid = true;
@@ -322,32 +334,37 @@ namespace esekfom
          */
         void predict_iterated()
         {
-            // 保留上一次的估计值
+            // 保留上一次迭代的估计值
             state_ikfom current_state = x_;
+            cov current_cov = P_;
 
-            std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
-            // 重置预测状态和预测协方差
+            // 重置预测状态和预测协方差 这样可以重复利用代码
+            // stateCurrentBegin为上一帧的后验状态 作为当前帧的初始 重新进行前向传播
             x_.pos = sBridge.stateCurrentBegin.pos;
             x_.rot = sBridge.stateCurrentBegin.rot;
             x_.vel = sBridge.stateCurrentBegin.vel;
             P_ = sBridge.covCurrentBegin;
+
+            // 重置当前帧的IMU位姿 添加第一个位姿上一帧的后验状态 帧内固定
+            sBridge.currentIMUpose.clear();
+            sBridge.currentIMUpose.push_back(sBridge.firstPose);
+
             // 拿回当前帧的IMU观测数据
             auto v_imu = sBridge.qCurrentIMU;
-            // angvel_avr为平均角速度，acc_avr为平均加速度，acc_imu为imu加速度，vel_imu为imu速度，pos_imu为imu位置
-            V3D angvel_avr, acc_avr, acc_imu, vel_imu, pos_imu;
-            //IMU旋转矩阵 消除运动失真的时候用
-            M3D R_imu;
-            double dt = 0;
 
+            // angvel_avr为平均角速度，acc_avr为平均加速度
+            V3D angvel_avr, acc_avr;
+
+            double dt = 0;
             input_ikfom in;
             // 遍历本次估计的所有IMU测量并且进行积分，离散中值法 前向传播
             for (auto it_imu = v_imu.begin(); it_imu < (v_imu.end() - 1); it_imu++)
             {
-                //拿到当前帧的imu数据
+                // 拿到当前帧的imu数据
                 auto &&head = *(it_imu);
-                //拿到下一帧的imu数据
+                // 拿到下一帧的imu数据
                 auto &&tail = *(it_imu + 1);
-                //判断时间先后顺序：下一帧时间戳是否小于上一帧结束时间戳 不符合直接continue
+                // 判断时间先后顺序：下一帧时间戳是否小于上一帧结束时间戳 不符合直接continue
                 if (tail->header.stamp.toSec() < sBridge.last_lidar_end_time)    continue;
                 // 中值积分
                 angvel_avr<<0.5 * (head->angular_velocity.x + tail->angular_velocity.x),
@@ -356,35 +373,102 @@ namespace esekfom
                 acc_avr   <<0.5 * (head->linear_acceleration.x + tail->linear_acceleration.x),
                         0.5 * (head->linear_acceleration.y + tail->linear_acceleration.y),
                         0.5 * (head->linear_acceleration.z + tail->linear_acceleration.z);
-                //通过重力数值对加速度进行调整(除上初始化的IMU大小*9.8)
+                // 通过重力数值对加速度进行调整(除上初始化的IMU大小*9.8)
                 acc_avr  = acc_avr * G_m_s2 / sBridge.mean_acc.norm();
-                //如果IMU开始时刻早于上次雷达最晚时刻(因为将上次最后一个IMU插入到此次开头了，所以会出现一次这种情况)
+                // 如果IMU开始时刻早于上次雷达最晚时刻(因为将上次最后一个IMU插入到此次开头了，所以会出现一次这种情况)
                 if(head->header.stamp.toSec() < sBridge.last_lidar_end_time)
                 {
-                    dt = tail->header.stamp.toSec() - sBridge.last_lidar_end_time; //从上次雷达时刻末尾开始传播 计算与此次IMU结尾之间的时间差
+                    // 从上次雷达时刻末尾开始传播 计算与此次IMU结尾之间的时间差
+                    dt = tail->header.stamp.toSec() - sBridge.last_lidar_end_time;
                 }
                 else
                 {
-                    dt = tail->header.stamp.toSec() - head->header.stamp.toSec();     //两个IMU时刻之间的时间间隔
+                    // 两个IMU时刻之间的时间间隔
+                    dt = tail->header.stamp.toSec() - head->header.stamp.toSec();
                 }
-
                 // 两帧IMU的中值作为输入in  用于前向传播
                 in.acc = acc_avr;
                 in.gyro = angvel_avr;
+
                 // IMU前向传播，每次传播的时间间隔为dt
+                // 由于将x_的位姿项重置到了上一帧结束时刻，保留了新估计的bias g 重新进行传播即预测迭代过程
                 predict(dt, sBridge.Q, in);
 
+                Eigen::Vector3d angvel_last = V3D(tail->angular_velocity.x, tail->angular_velocity.y, tail->angular_velocity.z) - x_.bg;
+                // 更新世界坐标系下的加速度 = R*(加速度-bias) - g
+                Eigen::Vector3d acc_s_last  = V3D(tail->linear_acceleration.x, tail->linear_acceleration.y, tail->linear_acceleration.z) * G_m_s2 / sBridge.mean_acc.norm();
+                acc_s_last = x_.rot * (acc_s_last - x_.ba) + x_.grav;
+
+                // 后一个IMU时刻距离此次雷达开始的时间间隔
+                double &&offs_t = tail->header.stamp.toSec() - sBridge.pcl_beg_time;
+                // 保留前向传播的结果 后续去畸变用
+                sBridge.currentIMUpose.push_back( set_pose6d( offs_t, acc_s_last, angvel_last, x_.vel, x_.pos, x_.rot.matrix() ) );
+
             }
-
-            // 处理最后一帧IMU
+            // 处理最后一帧IMU 前向传播更新结束
             predict(sBridge.last_delta_time, sBridge.Q, in);
-
-            std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
-            double timecost= std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
-            //std::cout << "Once predict iterated cost " << timecost * 1000 << " ms" << std::endl;
+            // 保存新的前向传播结果
             sBridge.stateIterated = x_;
+            sBridge.covIterated = P_;
+            // 恢复状态和协方差
             x_ = current_state;
+            P_ = current_cov;
         }
+
+
+        void undistort_iterated(PointCloudXYZI &pcl_in, PointCloudXYZI::Ptr& pcl_out)
+        {
+            // 输入的是当前帧的经过时间排序后的原始点云
+            PointCloudXYZI::Ptr pcl_origin(new PointCloudXYZI());
+            pcl::copyPointCloud(pcl_in, *pcl_origin);
+
+            // acc_imu为imu加速度，vel_imu为imu速度，pos_imu为imu位置
+            V3D acc_imu, vel_imu, pos_imu, angvel_avr;
+            //IMU旋转矩阵
+            M3D R_imu;
+
+            double dt = 0;
+            if (pcl_origin->points.begin() == pcl_origin->points.end()) return;
+            // 从最后一个点开始
+            auto it_pcl = pcl_origin->points.end() - 1;
+
+            //遍历每个IMU位姿 同样是从后往前
+            for (auto it_kp = sBridge.currentIMUpose.end() - 1; it_kp != sBridge.currentIMUpose.begin(); it_kp--)
+            {
+                auto head = it_kp - 1;
+                auto tail = it_kp;
+                // 分别拿到前一IMU帧的状态量和后一帧的IMU测量
+                R_imu<<MAT_FROM_ARRAY(head->rot);
+                vel_imu<<VEC_FROM_ARRAY(head->vel);
+                pos_imu<<VEC_FROM_ARRAY(head->pos);
+                acc_imu<<VEC_FROM_ARRAY(tail->acc);
+                angvel_avr<<VEC_FROM_ARRAY(tail->gyr);
+                // 之前点云按照时间从小到大排序过，IMUpose也同样是按照时间从小到大push进入的
+                // 此时从IMUpose的末尾开始循环，也就是从时间最大处开始，因此只需要判断 点云时间需>IMU head时刻  即可   不需要判断 点云时间<IMU tail
+                for(; it_pcl->curvature / double(1000) > head->offset_time; it_pcl --)
+                {
+                    // 点到IMU开始时刻的时间间隔
+                    dt = it_pcl->curvature / double(1000) - head->offset_time;
+                    // 点it_pcl所在时刻的旋转：前一帧的IMU旋转矩阵 * exp(后一帧角速度*dt)
+                    M3D R_i(R_imu * Sophus::SO3::exp(angvel_avr * dt).matrix() );
+                    // 点所在时刻的位置(雷达坐标系下)
+                    V3D P_i(it_pcl->x, it_pcl->y, it_pcl->z);
+                    // 从点所在的世界位置-雷达末尾世界位置
+                    // 下面开始用的都是新的预测迭代状态
+                    V3D T_ei(pos_imu + vel_imu * dt + 0.5 * acc_imu * dt * dt - sBridge.stateIterated.pos);
+
+                    V3D P_compensate = sBridge.stateIterated.offset_R_L_I.matrix().transpose() * (sBridge.stateIterated.rot.matrix().transpose() * (R_i * (sBridge.stateIterated.offset_R_L_I.matrix() * P_i + sBridge.stateIterated.offset_T_L_I) + T_ei) - sBridge.stateIterated.offset_T_L_I);
+
+                    it_pcl->x = P_compensate(0);
+                    it_pcl->y = P_compensate(1);
+                    it_pcl->z = P_compensate(2);
+
+                    if (it_pcl == pcl_origin->points.begin()) break;
+                }
+            }
+            pcl::copyPointCloud(*pcl_origin, *pcl_out);
+        }
+
 
 	private:
 		state_ikfom x_;

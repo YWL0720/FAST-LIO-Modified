@@ -263,14 +263,14 @@ namespace esekfom
                     x_propagated = sBridge.stateIterated;
                     P_propagated = sBridge.covIterated;
                     // 重新进行去畸变
-                    PointCloudXYZI::Ptr pcl_out(new PointCloudXYZI());
-                    undistort_iterated(sBridge.cur_pcl, pcl_out);
-                    // 清空当前点 重新进行下采样
                     feats_down_body->clear();
-                    sBridge.downSizeFilterSurf.setInputCloud(pcl_out);
-                    sBridge.downSizeFilterSurf.filter(*feats_down_body);
+                    undistort_iterated(sBridge.cur_pcl, feats_down_body);
+                    // 清空当前点 重新进行下采样
+
+//                    sBridge.downSizeFilterSurf.setInputCloud(pcl_out);
+//                    sBridge.downSizeFilterSurf.filter(*feats_down_body);
                     // 对有关变量重新调整大小
-                    normvec->resize(int(feats_down_body->points.size()));
+//                    normvec->resize(int(feats_down_body->points.size()));
 //                    Nearest_Points.resize(int(feats_down_body->points.size()));
                 }
 

@@ -621,10 +621,12 @@ int main(int argc, char** argv)
                 continue;
             }
 
+            p_imu1->sBridge.downSizeFilterSurf = downSizeFilterSurf;
             p_imu1->Process(Measures, kf, feats_undistort);
+            // feats_undistort为已经降采样后的点云
             // IMU数据传递
             kf.sBridge = p_imu1->sBridge;
-            kf.sBridge.downSizeFilterSurf = downSizeFilterSurf;
+
 
 
             //如果feats_undistort为空 ROS_WARN
@@ -642,8 +644,9 @@ int main(int argc, char** argv)
             lasermap_fov_segment();     //更新localmap边界，然后降采样当前帧点云
 
             //点云下采样
-            downSizeFilterSurf.setInputCloud(feats_undistort);
-            downSizeFilterSurf.filter(*feats_down_body);
+//            downSizeFilterSurf.setInputCloud(feats_undistort);
+//            downSizeFilterSurf.filter(*feats_down_body);
+            feats_down_body = feats_undistort;
             feats_down_size = feats_down_body->points.size();
 
             // std::cout << "feats_down_size :" << feats_down_size << std::endl;
@@ -675,9 +678,9 @@ int main(int argc, char** argv)
             }
 
             /*** iterated state estimation ***/
-            Nearest_Points.resize(feats_down_size * 10);         //存储近邻点的vector
+            Nearest_Points.resize(feats_down_size);         //存储近邻点的vector
             kf.update_iterated_dyn_share_modified(LASER_POINT_COV, feats_down_body, ikdtree, Nearest_Points, NUM_MAX_ITERATIONS, extrinsic_est_en);
-            feats_down_size = feats_down_body->points.size();
+
 
 
             state_point = kf.get_x();

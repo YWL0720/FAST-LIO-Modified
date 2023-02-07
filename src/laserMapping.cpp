@@ -585,7 +585,7 @@ int main(int argc, char** argv)
     ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry> ("/Odometry", 100000);
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> ("/path", 100000);
     ros::Publisher pubBa            = nh.advertise<geometry_msgs::Point>("/ba", 10000);
-
+    ros::Publisher pubG             = nh.advertise<geometry_msgs::Point>("/g", 10000);
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
     downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
 
@@ -693,6 +693,13 @@ int main(int argc, char** argv)
             ba.y = kf.get_x().ba[1];
             ba.z = kf.get_x().ba[2];
             pubBa.publish(ba);
+
+            geometry_msgs::Point g;
+            g.x = kf.get_x().grav[0];
+            g.y = kf.get_x().grav[1];
+            g.z = kf.get_x().grav[2];
+            pubG.publish(g);
+
             /******* Publish odometry *******/
             publish_odometry(pubOdomAftMapped);
 

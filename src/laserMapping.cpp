@@ -520,7 +520,7 @@ void publish_path(const ros::Publisher pubPath)
 
     /*** if path is too large, the rvis will crash ***/
     static int jjj = 0;
-    jjj++;
+//    jjj++;
     if (jjj % 10 == 0) 
     {
         path.poses.push_back(msg_body_pose);
@@ -584,6 +584,7 @@ int main(int argc, char** argv)
     ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/Laser_map", 100000);
     ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry> ("/Odometry", 100000);
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> ("/path", 100000);
+    ros::Publisher pubBa            = nh.advertise<geometry_msgs::Point>("/ba", 10000);
 
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
     downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
@@ -686,6 +687,12 @@ int main(int argc, char** argv)
             state_point = kf.get_x();
             pos_lid = state_point.pos + state_point.rot.matrix() * state_point.offset_T_L_I;
 
+
+            geometry_msgs::Point ba;
+            ba.x = kf.get_x().ba[0];
+            ba.y = kf.get_x().ba[1];
+            ba.z = kf.get_x().ba[2];
+            pubBa.publish(ba);
             /******* Publish odometry *******/
             publish_odometry(pubOdomAftMapped);
 

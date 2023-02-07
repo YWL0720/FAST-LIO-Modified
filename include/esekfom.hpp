@@ -46,6 +46,10 @@ namespace esekfom
 		esekf(){};
 		~esekf(){};
 
+
+
+
+
         IMUBridge sBridge;
 
 
@@ -247,19 +251,13 @@ namespace esekfom
 			dyn_share.valid = true;
 			dyn_share.converge = true;
 			int t = 0;
-            cout << "第" << time << "帧" << endl;
-            cout << "上一帧的估计值: "<<  endl;
-            cout << "ba = " << x_.ba.transpose() << endl;
-            cout << "bg = " << x_.bg.transpose() << endl;
-            cout << "g = " << x_.grav.transpose() << endl;
 
 
             // 需要进行迭代处理x_ 和P_
 			state_ikfom x_propagated = x_; //这里的x_和P_分别是经过正向传播后的状态量和协方差矩阵，因为会先调用predict函数再调用这个函数
 			cov P_propagated = P_;
 
-			vectorized_state dx_new = vectorized_state::Zero(); // 24X1的向量
-
+			vectorized_state dx_new = vectorized_state::Zero(); // 24X1的
             Eigen::Matrix<double, 24, 24> KH_;
             for (int i = -1; i < maximum_iter; i++)
             {
@@ -268,11 +266,11 @@ namespace esekfom
                     predict_iterated();
                     x_propagated = sBridge.stateIterated;
                     P_propagated = sBridge.covIterated;
-                    feats_down_body->clear();
-                    undistort_iterated(sBridge.cur_pcl, feats_down_body);
+//                    feats_down_body->clear();
+//                    undistort_iterated(sBridge.cur_pcl, feats_down_body);
 
 
-                    for (int j = -1; j < maximum_iter; j++)
+                    for (int j = -1; j < maximum_iter-1; j++)
                     {
                         dyn_share.valid = true;
                         // 计算雅克比，也就是点面残差的导数 H(代码里是h_x)

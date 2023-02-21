@@ -204,9 +204,10 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf &kf_state
     sort(pcl_temp->points.begin(), pcl_temp->points.end(), time_list);  //这里curvature中存放了时间戳（在preprocess.cpp中）
 
     // 这里提前进行降采样
-    sBridge.downSizeFilterSurf.setInputCloud(pcl_temp);
-    sBridge.downSizeFilterSurf.filter(pcl_out);
-
+    // 2.21 改 不进行重复去畸变过程 去掉提前降采样环节
+//    sBridge.downSizeFilterSurf.setInputCloud(pcl_temp);
+//    sBridge.downSizeFilterSurf.filter(pcl_out);
+    pcl_out = *pcl_temp;
 
     state_ikfom imu_state = kf_state.get_x();  // 获取上一次KF估计的后验状态作为本次IMU预测的初始状态
 

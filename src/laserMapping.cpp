@@ -624,7 +624,7 @@ int main(int argc, char** argv)
 
             p_imu1->sBridge.downSizeFilterSurf = downSizeFilterSurf;
             p_imu1->Process(Measures, kf, feats_undistort);
-            // feats_undistort为已经降采样后的点云
+
             // IMU数据传递
             kf.sBridge = p_imu1->sBridge;
 
@@ -645,9 +645,9 @@ int main(int argc, char** argv)
             lasermap_fov_segment();     //更新localmap边界，然后降采样当前帧点云
 
             //点云下采样
-//            downSizeFilterSurf.setInputCloud(feats_undistort);
-//            downSizeFilterSurf.filter(*feats_down_body);
-            feats_down_body = feats_undistort;
+            downSizeFilterSurf.setInputCloud(feats_undistort);
+            downSizeFilterSurf.filter(*feats_down_body);
+//            feats_down_body = feats_undistort;
             feats_down_size = feats_down_body->points.size();
 
             // std::cout << "feats_down_size :" << feats_down_size << std::endl;

@@ -116,7 +116,7 @@ namespace esekfom
 			#ifdef MP_EN
     			omp_set_num_threads(MP_PROC_NUM);
 			#pragma omp parallel for
-			#endif  
+			#endif
 
 			for (int i = 0; i < feats_down_size; i++) //遍历所有的特征点
 			{
@@ -205,7 +205,7 @@ namespace esekfom
 				V3D A(point_I_crossmat * C);
 				if (extrinsic_est)
 				{
-					V3D B(point_crossmat * x_.offset_R_L_I.matrix().transpose() * C); 
+					V3D B(point_crossmat * x_.offset_R_L_I.matrix().transpose() * C);
 					ekfom_data.h_x.block<1, 12>(i, 0) << norm_p.x, norm_p.y, norm_p.z, VEC_FROM_ARRAY(A), VEC_FROM_ARRAY(B), VEC_FROM_ARRAY(C);
 				}
 				else
@@ -266,9 +266,6 @@ namespace esekfom
                     predict_iterated();
                     x_propagated = sBridge.stateIterated;
                     P_propagated = sBridge.covIterated;
-//                    feats_down_body->clear();
-//                    undistort_iterated(sBridge.cur_pcl, feats_down_body);
-
 
                     for (int j = -1; j < maximum_iter-1; j++)
                     {
@@ -301,123 +298,44 @@ namespace esekfom
                     }
 
                 }
-
-                for (int j = -1; j < maximum_iter; j++)
+                else
                 {
-                    dyn_share.valid = true;
-                    // 计算雅克比，也就是点面残差的导数 H(代码里是h_x)
-                    h_share_model(dyn_share, feats_down_body, ikdtree, Nearest_Points, extrinsic_est);
-
-                    if(! dyn_share.valid)
+                    for (int j = -1; j < maximum_iter; j++)
                     {
-                        continue;
+                        dyn_share.valid = true;
+                        // 计算雅克比，也就是点面残差的导数 H(代码里是h_x)
+                        h_share_model(dyn_share, feats_down_body, ikdtree, Nearest_Points, extrinsic_est);
+
+                        if (!dyn_share.valid)
+                        {
+                            continue;
+                        }
+
+                        vectorized_state dx;
+                        dx_new = boxminus(x_, x_propagated);  //公式(18)中的 x^k - x^
+
+                        //由于H矩阵是稀疏的，只有前12列有非零元素，后12列是零 因此这里采用分块矩阵的形式计算 减少计算量
+                        auto H = dyn_share.h_x;  // m X 12 的矩阵
+                        Eigen::Matrix<double, 24, 24> HTH = Matrix<double, 24, 24>::Zero();   //矩阵 H^T * H
+                        HTH.block<12, 12>(0, 0) = H.transpose() * H;
+
+                        auto K_front = (HTH / R + P_.inverse()).inverse();
+                        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> K;
+                        K = K_front.block<24, 12>(0, 0) * H.transpose() / R;  //卡尔曼增益  这里R视为常数
+
+                        Eigen::Matrix<double, 24, 24> KH = Matrix<double, 24, 24>::Zero();   //矩阵 K * H
+                        KH.block<24, 12>(0, 0) = K * H;
+                        Matrix<double, 24, 1> dx_ =
+                                K * dyn_share.h + (KH - Matrix<double, 24, 24>::Identity()) * dx_new;   //公式(18)
+
+                        x_ = boxplus(x_, dx_);    //公式(18)
                     }
-
-                    vectorized_state dx;
-                    dx_new = boxminus(x_, x_propagated);  //公式(18)中的 x^k - x^
-
-                    //由于H矩阵是稀疏的，只有前12列有非零元素，后12列是零 因此这里采用分块矩阵的形式计算 减少计算量
-                    auto H = dyn_share.h_x;  // m X 12 的矩阵
-                    Eigen::Matrix<double, 24, 24> HTH = Matrix<double, 24, 24>::Zero();   //矩阵 H^T * H
-                    HTH.block<12, 12>(0, 0) = H.transpose() * H;
-
-                    auto K_front = (HTH / R + P_.inverse()).inverse();
-                    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> K;
-                    K = K_front.block<24, 12>(0, 0) * H.transpose() / R;  //卡尔曼增益  这里R视为常数
-
-                    Eigen::Matrix<double, 24, 24> KH = Matrix<double, 24, 24>::Zero();   //矩阵 K * H
-                    KH.block<24, 12>(0, 0) = K * H;
-                    Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - Matrix<double, 24, 24>::Identity()) * dx_new;   //公式(18)
-
-                    x_ = boxplus(x_, dx_);	//公式(18)
                 }
             }
 
             dyn_share.converge = true;
             P_ = (Matrix<double, 24, 24>::Identity() - KH_) * P_ ;     //公式(19)
 
-
- /*
-			for (int i = -1; i < maximum_iter; i++)	 // maximum_iter是卡尔曼滤波的最大迭代次数
-			{
-                // 从IEKF第二次迭代开始进行预测迭代
-                if (i > -1)
-                {
-                    // 前向预测迭代
-                    predict_iterated();
-                    // 更新预测状态和预测协方差
-                    x_propagated = sBridge.stateIterated;
-                    P_propagated = sBridge.covIterated;
-                    // 重新进行去畸变
-                    feats_down_body->clear();
-                    undistort_iterated(sBridge.cur_pcl, feats_down_body);
-                    // 清空当前点 重新进行下采样
-
-//                    sBridge.downSizeFilterSurf.setInputCloud(pcl_out);
-//                    sBridge.downSizeFilterSurf.filter(*feats_down_body);
-                    // 对有关变量重新调整大小
-//                    normvec->resize(int(feats_down_body->points.size()));
-//                    Nearest_Points.resize(int(feats_down_body->points.size()));
-                }
-
-				dyn_share.valid = true;
-				// 计算雅克比，也就是点面残差的导数 H(代码里是h_x)
-				h_share_model(dyn_share, feats_down_body, ikdtree, Nearest_Points, extrinsic_est); 
-
-				if(! dyn_share.valid)
-				{
-					continue;
-				}
-
-				vectorized_state dx;
-				dx_new = boxminus(x_, x_propagated);  //公式(18)中的 x^k - x^
-
-				//由于H矩阵是稀疏的，只有前12列有非零元素，后12列是零 因此这里采用分块矩阵的形式计算 减少计算量
-				auto H = dyn_share.h_x;  // m X 12 的矩阵
-				Eigen::Matrix<double, 24, 24> HTH = Matrix<double, 24, 24>::Zero();   //矩阵 H^T * H
-				HTH.block<12, 12>(0, 0) = H.transpose() * H;
-
-				auto K_front = (HTH / R + P_.inverse()).inverse();
-				Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> K;
-				K = K_front.block<24, 12>(0, 0) * H.transpose() / R;  //卡尔曼增益  这里R视为常数
-
-				Eigen::Matrix<double, 24, 24> KH = Matrix<double, 24, 24>::Zero();   //矩阵 K * H
-				KH.block<24, 12>(0, 0) = K * H;
-				Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - Matrix<double, 24, 24>::Identity()) * dx_new;   //公式(18)
-
-				x_ = boxplus(x_, dx_);	//公式(18)
-
-                cout << "   第" << i+1 << "次迭代后的估计值:" << endl;
-                cout << "   ba = " << x_.ba.transpose() << endl;
-                cout << "   bg = " << x_.bg.transpose() << endl;
-                cout << "   g = " << x_.grav.transpose() << endl;
-
-
-
-				dyn_share.converge = true;
-				for(int j = 0; j < 24 ; j++)
-				{
-					if(std::fabs(dx_[j]) > epsi)        //如果dx>epsi 认为没有收敛
-					{
-						dyn_share.converge = false;
-						break;
-					}
-				}
-
-				if(dyn_share.converge) t++;
-
-				if(!t && i == maximum_iter - 2)  //如果迭代了3次还没收敛 强制令成true，h_share_model函数中会重新寻找近邻点
-				{
-					dyn_share.converge = true;
-				}
-
-				if(t > 1 || i == maximum_iter - 1)
-				{
-					P_ = (Matrix<double, 24, 24>::Identity() - KH) * P_ ;     //公式(19)
-					return;
-				}
- 
-			}*/
 		}
 
 
